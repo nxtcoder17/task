@@ -6,6 +6,7 @@ type Tasks map[string]*Task
 // Task represents a task
 type Task struct {
 	Task                 string
+	Dotenv               []string
 	Cmds                 []*Cmd
 	Deps                 []*Dep
 	Label                string
@@ -53,6 +54,7 @@ func (t *Task) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	var task struct {
 		Cmds          []*Cmd
+		Dotenv        []string
 		Deps          []*Dep
 		Label         string
 		Desc          string
@@ -71,12 +73,13 @@ func (t *Task) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Prefix        string
 		IgnoreError   bool `yaml:"ignore_error"`
 		Run           string
-		ExportVars		bool `yaml:"exportVars"`
+		ExportVars    bool `yaml:"exportVars"`
 	}
 	if err := unmarshal(&task); err != nil {
 		return err
 	}
 	t.Cmds = task.Cmds
+	t.Dotenv = task.Dotenv
 	t.Deps = task.Deps
 	t.Label = task.Label
 	t.Desc = task.Desc

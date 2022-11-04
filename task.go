@@ -15,6 +15,7 @@ import (
 	"github.com/go-task/task/v3/internal/summary"
 	"github.com/go-task/task/v3/internal/templater"
 	"github.com/go-task/task/v3/taskfile"
+	"github.com/go-task/task/v3/taskfile/read"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -67,6 +68,20 @@ func (e *Executor) Run(ctx context.Context, calls ...taskfile.Call) error {
 		t, ok := e.Taskfile.Tasks[c.Task]
 
 		if t != nil {
+			dotEnvVars, err := read.DotenvForTask(e.Compiler, t, t.Dir)
+			if err != nil {
+				return err
+			}
+			if dotEnvVars != nil {
+				for k, v := range dotEnvVars.Mapping {
+					if t.Env == nil {
+						t.Env = &taskfile.Vars{}
+					}
+					t.Env.Set(k, v)
+				}
+			}
+
+
 			if e.Taskfile.ExportVars && e.Taskfile.Vars != nil {
 				for k, v := range e.Taskfile.Vars.Mapping {
 					if t.Env == nil {
