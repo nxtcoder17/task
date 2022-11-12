@@ -230,6 +230,21 @@ includes:
       DOCKER_IMAGE: frontend_image
 ```
 
+### Namespace aliases
+
+When including a Taskfile, you can give the namespace a list of `aliases`.
+This works in the same way as [task aliases](#task-aliases) and can be used
+together to create shorter and easier-to-type commands.
+
+```yaml
+version: '3'
+
+includes:
+  generate:
+    taskfile: ./taskfiles/Generate.yml
+    aliases: [gen]
+```
+
 :::info
 
 Vars declared in the included Taskfile have preference over the
@@ -465,6 +480,11 @@ tasks:
     method: timestamp
 ```
 
+In situations where you need more flexibility the `status` keyword can be used.
+You can even combine the two. See the documentation for
+[status](#using-programmatic-checks-to-indicate-a-task-is-up-to-date) for an
+example.
+
 :::info
 
 By default, task stores checksums on a local `.task` directory in the project's
@@ -554,6 +574,30 @@ up-to-date.
 
 Also, `task --status [tasks]...` will exit with a non-zero exit code if any of
 the tasks are not up-to-date.
+
+`status` can be combined with the [fingerprinting](#by-fingerprinting-locally-generated-files-and-their-sources)
+to have a task run if either the the source/generated artifacts changes, or the
+programmatic check fails:
+
+```yaml
+version: '3'
+
+tasks:
+  build:prod:
+    desc: Build for production usage.
+    cmds:
+      - composer install
+    # Run this task if source files changes.
+    sources:
+      - composer.json
+      - composer.lock
+    generates:
+      - ./vendor/composer/installed.json
+      - ./vendor/autoload.php
+    # But also run the task if the last build was not a production build.
+    status:
+      - grep -q '"dev": false' ./vendor/composer/installed.json
+```
 
 ### Using programmatic checks to cancel the execution of a task and its dependencies
 
@@ -936,6 +980,30 @@ If the task does not have a summary or a description, a warning is printed.
 
 Please note: *showing the summary will not execute the command*.
 
+## Task aliases
+
+Aliases are alternative names for tasks. They can be used to make it easier and
+quicker to run tasks with long or hard-to-type names. You can use them on the
+command line, when [calling sub-tasks](#calling-another-task) in your Taskfile
+and when [including tasks](#including-other-taskfiles) with aliases from another
+Taskfile. They can also be used together with [namespace
+aliases](#namespace-aliases).
+
+```yaml
+version: '3'
+
+tasks:
+  generate:
+    aliases: [gen]
+    cmds:
+      - task: gen-mocks
+
+  generate-mocks:
+    aliases: [gen-mocks]
+    cmds:
+      - echo "generating..."
+```
+
 ## Overriding task name
 
 Sometimes you may want to override the task name printed on the summary, up-to-date
@@ -1217,6 +1285,10 @@ tasks:
 With the flags `--watch` or `-w` task will watch for file changes
 and run the task again. This requires the `sources` attribute to be given,
 so task knows which files to watch.
+
+The default watch interval is 5 seconds, but it's possible to change it by
+either setting `interval: '500ms'` in the root of the Taskfile passing it
+as an argument like `--interval=500ms`.
 
 [gotemplate]: https://golang.org/pkg/text/template/
 [minify]: https://github.com/tdewolff/minify/tree/master/cmd/minify

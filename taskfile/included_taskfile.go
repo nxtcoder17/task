@@ -8,6 +8,7 @@ import (
 	"github.com/go-task/task/v3/internal/execext"
 	"github.com/go-task/task/v3/internal/filepathext"
 
+	"golang.org/x/exp/slices"
 	"gopkg.in/yaml.v3"
 )
 
@@ -15,8 +16,10 @@ import (
 type IncludedTaskfile struct {
 	Taskfile       string
 	Dir            string
+	DotEnv         []string
 	Optional       bool
 	Internal       bool
+	Aliases        []string
 	AdvancedImport bool
 	Vars           *Vars
 	BaseDir        string // The directory from which the including taskfile was loaded; used to resolve relative paths
@@ -60,10 +63,12 @@ func (tfs *IncludedTaskfiles) Len() int {
 
 // Merge merges the given IncludedTaskfiles into the caller one
 func (tfs *IncludedTaskfiles) Merge(other *IncludedTaskfiles) {
-	_ = other.Range(func(key string, value IncludedTaskfile) error {
-		tfs.Set(key, value)
-		return nil
-	})
+	_ = other.Range(
+		func(key string, value IncludedTaskfile) error {
+			tfs.Set(key, value)
+			return nil
+		},
+	)
 }
 
 // Set sets a value to a given key
@@ -71,7 +76,7 @@ func (tfs *IncludedTaskfiles) Set(key string, includedTaskfile IncludedTaskfile)
 	if tfs.Mapping == nil {
 		tfs.Mapping = make(map[string]IncludedTaskfile, 1)
 	}
-	if !stringSliceContains(tfs.Keys, key) {
+	if !slices.Contains(tfs.Keys, key) {
 		tfs.Keys = append(tfs.Keys, key)
 	}
 	tfs.Mapping[key] = includedTaskfile
@@ -101,8 +106,10 @@ func (it *IncludedTaskfile) UnmarshalYAML(unmarshal func(interface{}) error) err
 	var includedTaskfile struct {
 		Taskfile string
 		Dir      string
+		DotEnv   []string
 		Optional bool
 		Internal bool
+		Aliases  []string
 		Vars     *Vars
 	}
 	if err := unmarshal(&includedTaskfile); err != nil {
@@ -110,11 +117,31 @@ func (it *IncludedTaskfile) UnmarshalYAML(unmarshal func(interface{}) error) err
 	}
 	it.Taskfile = includedTaskfile.Taskfile
 	it.Dir = includedTaskfile.Dir
+	it.DotEnv = includedTaskfile.DotEnv
 	it.Optional = includedTaskfile.Optional
 	it.Internal = includedTaskfile.Internal
+	it.Aliases = includedTaskfile.Aliases
 	it.AdvancedImport = true
 	it.Vars = includedTaskfile.Vars
 	return nil
+}
+
+// DeepCopy creates a new instance of IncludedTaskfile and copies
+// data by value from the source struct.
+func (it *IncludedTaskfile) DeepCopy() *IncludedTaskfile {
+	if it == nil {
+		return nil
+	}
+	return &IncludedTaskfile{
+		Taskfile:       it.Taskfile,
+		Dir:            it.Dir,
+		DotEnv:         it.DotEnv,
+		Optional:       it.Optional,
+		Internal:       it.Internal,
+		AdvancedImport: it.AdvancedImport,
+		Vars:           it.Vars.DeepCopy(),
+		BaseDir:        it.BaseDir,
+	}
 }
 
 // FullTaskfilePath returns the fully qualified path to the included taskfile

@@ -79,6 +79,7 @@ func Taskfile(readerNode *ReaderNode) (*taskfile.Taskfile, error) {
 				Dir:            tr.Replace(includedTask.Dir),
 				Optional:       includedTask.Optional,
 				Internal:       includedTask.Internal,
+				Aliases:        includedTask.Aliases,
 				AdvancedImport: includedTask.AdvancedImport,
 				Vars:           includedTask.Vars,
 				BaseDir:        includedTask.BaseDir,
@@ -149,9 +150,16 @@ func Taskfile(readerNode *ReaderNode) (*taskfile.Taskfile, error) {
 			}
 		}
 
-		if err = taskfile.Merge(t, includedTaskfile, includedTask.Internal, namespace); err != nil {
+		if err = taskfile.Merge(t, includedTaskfile, &includedTask, namespace); err != nil {
 			return err
 		}
+
+		if includedTaskfile.Tasks["default"] != nil && t.Tasks[namespace] == nil {
+			defaultTaskName := fmt.Sprintf("%s:default", namespace)
+			t.Tasks[defaultTaskName].Aliases = append(t.Tasks[defaultTaskName].Aliases, namespace)
+			t.Tasks[defaultTaskName].Aliases = append(t.Tasks[defaultTaskName].Aliases, includedTask.Aliases...)
+		}
+
 		return nil
 	})
 	if err != nil {
@@ -165,7 +173,7 @@ func Taskfile(readerNode *ReaderNode) (*taskfile.Taskfile, error) {
 			if err != nil {
 				return nil, err
 			}
-			if err = taskfile.Merge(t, osTaskfile, false); err != nil {
+			if err = taskfile.Merge(t, osTaskfile, nil); err != nil {
 				return nil, err
 			}
 		}
@@ -188,7 +196,10 @@ func readTaskfile(file string) (*taskfile.Taskfile, error) {
 		return nil, err
 	}
 	var t taskfile.Taskfile
-	return &t, yaml.NewDecoder(f).Decode(&t)
+	if err := yaml.NewDecoder(f).Decode(&t); err != nil {
+		return nil, fmt.Errorf("task: Failed to parse %s:\n%w", filepathext.TryAbsToRel(file), err)
+	}
+	return &t, nil
 }
 
 func exists(path string) (string, error) {

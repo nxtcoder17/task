@@ -6,8 +6,9 @@ tasks:
     cmds:
       - yarn install
 
-  start:
+  default:
     desc: Start website
+    aliases: [s, start]
     vars:
       HOST: '{{default "localhost" .HOST}}'
       PORT: '{{default "3001" .PORT}}'
@@ -25,6 +26,7 @@ tasks:
       - rm -rf ./build
 
   deploy:
-    desc: Build and deploy Docusaurus. Requires GIT_USER and GIT_PASS envs to be previous set
+    desc: Build and deploy Docusaurus
+    summary: Requires GIT_USER and GIT_PASS envs to be previous set
     cmds:
       - npx docusaurus deploy

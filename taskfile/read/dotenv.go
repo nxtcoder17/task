@@ -11,6 +11,40 @@ import (
 	"github.com/go-task/task/v3/taskfile"
 )
 
+func DotenvForTask(_ compiler.Compiler, task *taskfile.Task, dir string) (*taskfile.Vars, error) {
+	if len(task.Dotenv) == 0 {
+		return nil, nil
+	}
+
+	env := &taskfile.Vars{}
+
+	tr := templater.Templater{Vars: &taskfile.Vars{}, RemoveNoValue: true}
+
+	for _, dotEnvPath := range task.Dotenv {
+		dotEnvPath = tr.Replace(dotEnvPath)
+		if dotEnvPath == "" {
+			continue
+		}
+		dotEnvPath = filepathext.SmartJoin(dir, dotEnvPath)
+
+		if _, err := os.Stat(dotEnvPath); os.IsNotExist(err) {
+			continue
+		}
+
+		envs, err := godotenv.Read(dotEnvPath)
+		if err != nil {
+			return nil, err
+		}
+		for key, value := range envs {
+			if _, ok := env.Mapping[key]; !ok {
+				env.Set(key, taskfile.Var{Static: value})
+			}
+		}
+	}
+
+	return env, nil
+}
+
 func Dotenv(c compiler.Compiler, tf *taskfile.Taskfile, dir string) (*taskfile.Vars, error) {
 	if len(tf.Dotenv) == 0 {
 		return nil, nil

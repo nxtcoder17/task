@@ -19,6 +19,7 @@ type Taskfile struct {
 	Dotenv     []string
 	Run        string
 	ExportVars bool
+	Interval   string
 }
 
 // UnmarshalYAML implements yaml.Unmarshaler interface
@@ -36,10 +37,13 @@ func (tf *Taskfile) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Dotenv     []string
 		Run        string
 		ExportVars bool `yaml:"exportVars"`
+		Interval   string
 	}
+
 	if err := unmarshal(&taskfile); err != nil {
 		return err
 	}
+
 	tf.Version = taskfile.Version
 	tf.Expansions = taskfile.Expansions
 	tf.Output = taskfile.Output
@@ -52,6 +56,7 @@ func (tf *Taskfile) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	tf.Dotenv = taskfile.Dotenv
 	tf.Run = taskfile.Run
 	tf.ExportVars = taskfile.ExportVars
+	tf.Interval = taskfile.Interval
 	if tf.Expansions <= 0 {
 		tf.Expansions = 2
 	}
