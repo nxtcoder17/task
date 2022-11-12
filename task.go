@@ -81,8 +81,8 @@ func (e *Executor) PatchCLIArgsToEnv(_ context.Context, task *taskfile.Task) err
 		}
 	}
 
-	if (e.Taskfile.ExportVars || t.ExportVars) && t.Vars != nil {
-		for k, v := range t.Vars.Mapping {
+	if (e.Taskfile.ExportVars || task.ExportVars) && task.Vars != nil {
+		for k, v := range task.Vars.Mapping {
 			if task.Env == nil {
 				task.Env = &taskfile.Vars{}
 			}
