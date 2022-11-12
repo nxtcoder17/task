@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -17,6 +19,8 @@ import (
 	"github.com/go-task/task/v3/taskfile"
 	"github.com/go-task/task/v3/taskfile/read"
 
+	"github.com/sajari/fuzzy"
+	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -42,6 +46,7 @@ type Executor struct {
 	Parallel    bool
 	Color       bool
 	Concurrency int
+	Interval    string
 
 	Stdin  io.Reader
 	Stdout io.Writer
@@ -52,7 +57,8 @@ type Executor struct {
 	Output      output.Output
 	OutputStyle taskfile.Output
 
-	taskvars *taskfile.Vars
+	taskvars   *taskfile.Vars
+	fuzzyModel *fuzzy.Model
 
 	concurrencySemaphore chan struct{}
 	taskCallCount        map[string]*int32
@@ -61,54 +67,68 @@ type Executor struct {
 	executionHashesMutex sync.Mutex
 }
 
+func (e *Executor) PatchCLIArgsToEnv(_ context.Context, task *taskfile.Task) error {
+	if task == nil {
+		return nil
+	}
+
+	if e.Taskfile.ExportVars && e.Taskfile.Vars != nil {
+		for k, v := range e.Taskfile.Vars.Mapping {
+			if task.Env == nil {
+				task.Env = &taskfile.Vars{}
+			}
+			task.Env.Set(k, v)
+		}
+	}
+
+	if (e.Taskfile.ExportVars || t.ExportVars) && t.Vars != nil {
+		for k, v := range t.Vars.Mapping {
+			if task.Env == nil {
+				task.Env = &taskfile.Vars{}
+			}
+			task.Env.Set(k, v)
+		}
+	}
+	return nil
+}
+
+func (e *Executor) PatchTaskLevelDotEnv(_ context.Context, task *taskfile.Task) error {
+	dotEnvVars, err := read.DotenvForTask(e.Compiler, task, task.Dir)
+	if err != nil {
+		return err
+	}
+	if dotEnvVars != nil {
+		for k, v := range dotEnvVars.Mapping {
+			if task.Env == nil {
+				task.Env = &taskfile.Vars{}
+			}
+			task.Env.Set(k, v)
+		}
+	}
+	return nil
+}
+
 // Run runs Task
 func (e *Executor) Run(ctx context.Context, calls ...taskfile.Call) error {
-	// check if given tasks exist
-	for _, c := range calls {
-		t, ok := e.Taskfile.Tasks[c.Task]
+	for _, call := range calls {
+		task, err := e.GetTask(call)
+		if err != nil {
+			e.ListTasks(FilterOutInternal(), FilterOutNoDesc())
+			return err
+		}
 
-		if t != nil {
-			dotEnvVars, err := read.DotenvForTask(e.Compiler, t, t.Dir)
-			if err != nil {
+		if task != nil {
+			if err := e.PatchTaskLevelDotEnv(ctx, task); err != nil {
 				return err
 			}
-			if dotEnvVars != nil {
-				for k, v := range dotEnvVars.Mapping {
-					if t.Env == nil {
-						t.Env = &taskfile.Vars{}
-					}
-					t.Env.Set(k, v)
-				}
-			}
-
-
-			if e.Taskfile.ExportVars && e.Taskfile.Vars != nil {
-				for k, v := range e.Taskfile.Vars.Mapping {
-					if t.Env == nil {
-						t.Env = &taskfile.Vars{}
-					}
-					t.Env.Set(k, v)
-				}
-			}
-
-			if (e.Taskfile.ExportVars || t.ExportVars) && t.Vars != nil {
-				for k, v := range t.Vars.Mapping {
-					if t.Env == nil {
-						t.Env = &taskfile.Vars{}
-					}
-					t.Env.Set(k, v)
-				}
+			if err := e.PatchCLIArgsToEnv(ctx, task); err != nil {
+				return err
 			}
 		}
 
-		if !ok {
-			// FIXME: move to the main package
-			e.ListTasksWithDesc()
-			return &taskNotFoundError{taskName: c.Task}
-		}
-		if t.Internal {
-			e.ListTasksWithDesc()
-			return &taskInternalError{taskName: c.Task}
+		if task.Internal {
+			e.ListTasks(FilterOutInternal(), FilterOutNoDesc())
+			return &taskInternalError{taskName: call.Task}
 		}
 	}
 
@@ -148,8 +168,8 @@ func (e *Executor) RunTask(ctx context.Context, call taskfile.Call) error {
 	if err != nil {
 		return err
 	}
-	if !e.Watch && atomic.AddInt32(e.taskCallCount[call.Task], 1) >= MaximumTaskCall {
-		return &MaximumTaskCallExceededError{task: call.Task}
+	if !e.Watch && atomic.AddInt32(e.taskCallCount[t.Task], 1) >= MaximumTaskCall {
+		return &MaximumTaskCallExceededError{task: t.Task}
 	}
 
 	release := e.acquireConcurrencyLimit()
@@ -365,4 +385,114 @@ func (e *Executor) startExecution(ctx context.Context, t *taskfile.Task, execute
 	e.executionHashesMutex.Unlock()
 
 	return execute(ctx)
+}
+
+// GetTask will return the task with the name matching the given call from the taskfile.
+// If no task is found, it will search for tasks with a matching alias.
+// If multiple tasks contain the same alias or no matches are found an error is returned.
+func (e *Executor) GetTask(call taskfile.Call) (*taskfile.Task, error) {
+	// Search for a matching task
+	matchingTask, ok := e.Taskfile.Tasks[call.Task]
+	if ok {
+		return matchingTask, nil
+	}
+
+	// If didn't find one, search for a task with a matching alias
+	var aliasedTasks []string
+	for _, task := range e.Taskfile.Tasks {
+		if slices.Contains(task.Aliases, call.Task) {
+			aliasedTasks = append(aliasedTasks, task.Task)
+			matchingTask = task
+		}
+	}
+	// If we found multiple tasks
+	if len(aliasedTasks) > 1 {
+		return nil, &multipleTasksWithAliasError{
+			aliasName: call.Task,
+			taskNames: aliasedTasks,
+		}
+	}
+	// If we found no tasks
+	if len(aliasedTasks) == 0 {
+		didYouMean := ""
+		if e.fuzzyModel != nil {
+			didYouMean = e.fuzzyModel.SpellCheck(call.Task)
+		}
+		return nil, &taskNotFoundError{
+			taskName:   call.Task,
+			didYouMean: didYouMean,
+		}
+	}
+
+	return matchingTask, nil
+}
+
+type FilterFunc func(tasks []*taskfile.Task) []*taskfile.Task
+
+func (e *Executor) GetTaskList(filters ...FilterFunc) []*taskfile.Task {
+	tasks := make([]*taskfile.Task, 0, len(e.Taskfile.Tasks))
+
+	// Fetch and compile the list of tasks
+	for _, task := range e.Taskfile.Tasks {
+		compiledTask, err := e.FastCompiledTask(taskfile.Call{Task: task.Task})
+		if err == nil {
+			task = compiledTask
+		}
+		tasks = append(tasks, task)
+	}
+
+	// Filter the tasks
+	for _, filter := range filters {
+		tasks = filter(tasks)
+	}
+
+	// Sort the tasks
+	// Tasks that are not namespaced should be listed before tasks that are.
+	// We detect this by searching for a ':' in the task name.
+	sort.Slice(tasks, func(i, j int) bool {
+		iContainsColon := strings.Contains(tasks[i].Task, ":")
+		jContainsColon := strings.Contains(tasks[j].Task, ":")
+		if iContainsColon == jContainsColon {
+			return tasks[i].Task < tasks[j].Task
+		}
+		if !iContainsColon && jContainsColon {
+			return true
+		}
+		return false
+	})
+
+	return tasks
+}
+
+// Filter is a generic task filtering function. It will remove each task in the
+// slice where the result of the given function is true.
+func Filter(f func(task *taskfile.Task) bool) FilterFunc {
+	return func(tasks []*taskfile.Task) []*taskfile.Task {
+		shift := 0
+		for _, task := range tasks {
+			if !f(task) {
+				tasks[shift] = task
+				shift++
+			}
+		}
+		// This loop stops any memory leaks
+		for j := shift; j < len(tasks); j++ {
+			tasks[j] = nil
+		}
+		return slices.Clip(tasks[:shift])
+	}
+}
+
+// FilterOutNoDesc removes all tasks that do not contain a description.
+func FilterOutNoDesc() FilterFunc {
+	return Filter(func(task *taskfile.Task) bool {
+		return task.Desc == ""
+	})
+}
+
+// FilterOutInternal removes all tasks that are marked as internal.
+func FilterOutInternal() FilterFunc {
+	return Filter(func(task *taskfile.Task) bool {
+		return task.Internal
+	})
 }

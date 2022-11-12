@@ -11,7 +11,7 @@ import (
 	"github.com/go-task/task/v3/taskfile"
 )
 
-func DotenvForTask(c compiler.Compiler, task *taskfile.Task, dir string) (*taskfile.Vars, error) {
+func DotenvForTask(_ compiler.Compiler, task *taskfile.Task, dir string) (*taskfile.Vars, error) {
 	if len(task.Dotenv) == 0 {
 		return nil, nil
 	}
